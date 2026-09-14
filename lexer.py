@@ -46,3 +46,25 @@ tokens = [
     'DOT',          # .
     'COLON',        # :
 ] + list(reserved.values())
+
+t_RANGE      = r'\.\.'
+t_COMP_LEFT  = r'<>--'
+t_COMP_RIGHT = r'--<>'
+t_LBRACE     = r'\{'
+t_RBRACE     = r'\}'
+t_LPAREN     = r'\('
+t_RPAREN     = r'\)'
+t_LBRACKET   = r'\['
+t_RBRACKET   = r'\]'
+t_STAR       = r'\*'
+t_AT         = r'@'
+t_DOT        = r'\.'
+t_COLON      = r':'
+
+
+t_ignore = ' \t'
+
+
+def t_newline(t):
+    r'\n+'
+    t.lexer.lineno += len(t.value)
