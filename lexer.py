@@ -61,10 +61,31 @@ t_AT         = r'@'
 t_DOT        = r'\.'
 t_COLON      = r':'
 
-
 t_ignore = ' \t'
-
 
 def t_newline(t):
     r'\n+'
     t.lexer.lineno += len(t.value)
+
+#
+def t_IDENTIFIER(t):
+    #palavras comecadas com letra ou _
+    r'[a-zA-Z_][a-zA-Z0-9_]*' 
+    
+    #tá no dicionario?
+    if t.value in reserved:
+        t.type = reserved[t.value] 
+    
+    # se não for palavra reservada
+    else:
+        if t.value[0].isupper() and not any(char.isdigit() for char in t.value):
+            t.type = 'CLASS_NAME'
+            
+        elif t.value[0].islower() and not any(char.isdigit() for char in t.value):
+            t.type = 'RELATION_NAME'
+            
+        #verificação se o ultimo caractere é número
+        elif t.value[-1].isdigit():
+            t.type = 'INSTANCE_NAME'
+    
+    return t
