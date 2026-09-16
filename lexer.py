@@ -30,6 +30,7 @@ tokens = [
     'CLASS_NAME',
     'RELATION_NAME',
     'INSTANCE_NAME',
+    'ERROR',
 
     # simbolos
     'LBRACE',       # {
@@ -87,5 +88,8 @@ def t_IDENTIFIER(t):
         #verificação se o ultimo caractere é número
         elif t.value[-1].isdigit():
             t.type = 'INSTANCE_NAME'
+
+        else:
+            t.type = 'ERROR'
     
     return t
