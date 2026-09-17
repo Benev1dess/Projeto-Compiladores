@@ -32,13 +32,20 @@ KEYWORDS = {
 }
 
 NATIVE_TYPES = {
-    'number': 'TYPE_NUMBER', 'string': 'TYPE_STRING', 'boolean': 'TYPE_BOOLEAN',
-    'date': 'TYPE_DATE', 'time': 'TYPE_TIME', 'datetime': 'TYPE_DATETIME'
+    'number': 'TYPE_NUMBER', 
+    'string': 'TYPE_STRING', 
+    'boolean': 'TYPE_BOOLEAN',
+    'date': 'TYPE_DATE', 
+    'time': 'TYPE_TIME', 
+    'datetime': 'TYPE_DATETIME'
 }
 
 META_ATTRIBUTES = {
-    'ordered': 'META_ORDERED', 'const': 'META_CONST', 'derived': 'META_DERIVED',
-    'subsets': 'META_SUBSETS', 'redefines': 'META_REDEFINES'
+    'ordered': 'META_ORDERED', 
+    'const': 'META_CONST', 
+    'derived': 'META_DERIVED',
+    'subsets': 'META_SUBSETS', 
+    'redefines': 'META_REDEFINES'
 }
 
 reserved = {}
@@ -48,15 +55,14 @@ reserved.update(KEYWORDS)
 reserved.update(NATIVE_TYPES)
 reserved.update(META_ATTRIBUTES)
 
+
 tokens = [
-    #categorias gerais
     'CLASS_NAME',
     'RELATION_NAME',
     'INSTANCE_NAME',
     'CUSTOM_DATATYPE',
     'ERROR_IDENTIFIER',
 
-    # simbolos
     'LBRACE',       # {
     'RBRACE',       # }
     'LPAREN',       # (
@@ -98,9 +104,8 @@ def t_newline(t):
     r'\n+'
     t.lexer.lineno += len(t.value)
 
-#
 def t_IDENTIFIER(t):
-    #palavras comecadas com letra ou _
+
     r'[a-zA-Z_][a-zA-Z0-9_]*' 
     val = t.value
     
