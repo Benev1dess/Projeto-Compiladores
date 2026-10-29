@@ -1,0 +1,4 @@
+import Pessoa
+import Hospital
+
+package Paciente

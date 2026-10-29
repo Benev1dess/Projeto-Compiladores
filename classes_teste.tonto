@@ -1,0 +1,12 @@
+
+import Pessoa
+import Hospital
+
+package Clinica
+
+kind Pessoa
+role Paciente specializes Pessoa
+subkind Medico specializes Pessoa
+phase Crianca specializes Pessoa
+relator Consulta
+kind Endereco {}
