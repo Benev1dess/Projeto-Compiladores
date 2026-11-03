@@ -7,17 +7,15 @@ start = 'document'
 codigo_fonte = ''
 
 
-# Um documento possui importacoes, pacote e declaracoes de classes
+# No documento já temos importacoes, pacote e declaracoes
 def p_document(p):
-    'document : imports KW_PACKAGE package_name classes'
+    'document : imports KW_PACKAGE package_name declarations'
     p[0] = {
         'pacote': p[3],
         'imports': p[1],
-        'classes': p[4]
+        'declaracoes': p[4]
     }
 
-
-# Lista opcional de importacoes
 def p_imports(p):
     '''imports : imports import_decl
                | empty'''
@@ -34,24 +32,44 @@ def p_package_name(p):
                     | RELATION_NAME'''
     p[0] = p[1]
 
-
-# Permite varias declaracoes de classe no mesmo arquivo
-def p_classes(p):
-    '''classes : classes class_decl
-               | empty'''
+def p_declarations(p):
+    '''declarations : declarations declaration
+                | empty'''
     p[0] = p[1] + [p[2]] if len(p) == 3 else []
 
+# Direciona para o tipo específico a ser tratado
+def p_declaration(p):
+    '''declaration : class_decl
+               | enum_decl
+               | datatype_decl'''
+    p[0] = p[1]
 
 # Cada classe possui estereotipo, nome e superclasse opcional
 def p_class_decl(p):
-    'class_decl : class_stereotype CLASS_NAME superclass_opt class_body_opt'
+    'class_decl : KW_ENUM CLASS_NAME enum_values RBRACE'
 
     p[0] = {
+        'tipo_declaracao': 'enum',
         'nome': p[2],
         'estereotipo': p[1],
         'superclasse': p[3],
         'linha': p.lineno(1)
     }
+
+def p_enum_values(p):
+    '''enum_values : enum_values COMMA INSTANCE_NAME
+                    | INSTANCE_NAME'''
+    p[0] =p[1] + [p[3]] if len(p) == 4 else [p[1]]
+
+def p_datatype_decl(p):
+    'datatype_decl : KW_DATATYPE CUSTOM_DATATYPE LBRACE attributes_opt RBRACE'
+    p[0] = {
+        'tipo_declaracao': 'datatype',
+        'nome': p[2],
+        'atributos': p[4],
+        'linha': p.lineno(1)
+    }
+
 
 
 # Estereotipos aceitos nas declaracoes de classes
