@@ -41,7 +41,8 @@ def p_declarations(p):
 def p_declaration(p):
     '''declaration : class_decl
                | enum_decl
-               | datatype_decl'''
+               | datatype_decl
+               | external_relation'''
     p[0] = p[1]
 
 # Cada classe possui estereotipo, nome, superclasse opcional e corpo
@@ -125,9 +126,15 @@ def p_attributes_opt(p):
     p[0] = p[1] if p[1] else [] 
     
 def p_attributes(p):
-    '''attributes : attributes attribute 
-                 | attribute'''     
+    '''attributes : attributes class_item
+                 | class_item'''     
     p[0] = p[1] + [p[2]] if len(p) == 3 else [p[1]]
+
+def p_class_item(p):
+    '''class_item : attribute
+                | internal__relation'''
+
+    p[0] = p[1]
 
 def p_attribute(p):
     'attribute : RELATION_NAME COLON data_type meta_opt'
@@ -136,6 +143,77 @@ def p_attribute(p):
         'tipo_dado': p[3],
         'meta': p[4]
     }
+
+# Relacao Interna (dentro das chaves de uma classe)
+def p_internal_relation(p):
+    'internal_relation : AT relation_stereotype cardinality relation_sym cardinality CLASS_NAME'
+    p[0] = { 
+        'tipo_item': 'relacao_interna',
+        'estereotipo': p[2],
+        'cardinalidade_origem': p[3],
+        'simbolo': p[4],
+        'cardinalidade_destino': p[5],
+        'destino': p[6]
+    }
+
+# Relacao Externa (escopo global)
+def p_external_relation(p):
+    'external_relation : AT relation_stereotype KW_RELATION CLASS_NAME cardinality relation_sym cardinality CLASS_NAME'
+    p[0] = {
+        'tipo_declaracao': 'relacao_externa',
+        'estereotipo': p[2],
+        'dominio': p[4],
+        'cardinalidade_dominio': p[5],
+        'simbolo': p[6],
+        'cardinalidade_imagem': p[7],
+        'imagem': p[8],
+        'linha': p.lineno(1)
+    }
+
+def p_cardinality(p):
+    '''cardinality : LBRACKET NUMBER RBRACKET
+                   | LBRACKET NUMBER RANGE NUMBER RBRACKET
+                   | LBRACKET NUMBER RANGE STAR RBRACKET
+                   | LBRACKET STAR RBRACKET'''
+    if len(p) == 4:
+        p[0] = str(p[2])
+    else:
+        p[0] = f"{p[2]}..{p[4]}"
+
+def p_relation_sym(p):
+    '''relation_sym : COMP_LEFT
+                    | COMP_RIGHT
+                    | DASH'''
+    p[0] = p[1]
+
+# Uma amostra dos estereotipos de relacao (adicione os demais do seu Lexer se faltar algum)
+def p_relation_stereotype(p):
+    '''relation_stereotype : ST_COMPONENT_OF
+                           | ST_MEDIATION
+                           | ST_MATERIAL
+                           | ST_DERIVATION
+                           | ST_CHARACTERIZATION
+                           | ST_COMPARATIVE
+                           | ST_EXTERNAL_DEPENDENCE
+                           | ST_MEMBER_OF
+                           | ST_SUB_COLLECTION_OF
+                           | ST_SUB_QUALITY_OF
+                           | ST_INSTANTIATION
+                           | ST_TERMINATION
+                           | ST_PARTICIPATIONAL
+                           | ST_PARTICIPATION
+                           | ST_HISTORICAL_DEPENDENCE
+                           | ST_CREATION
+                           | ST_MANIFESTATION
+                           | ST_BRINGS_ABOUT
+                           | ST_TRIGGERS
+                           | ST_COMPOSITION
+                           | ST_AGGREGATION
+                           | ST_INHERENCE
+                           | ST_VALUE
+                           | ST_FORMAL
+                           | ST_CONSTITUTION'''
+    p[0] = p[1]
 
 def p_data_type(p):
     '''data_type : TYPE_NUMBER
@@ -247,5 +325,7 @@ if __name__ == '__main__':
         
         elif decl['tipo_declaracao'] == 'datatype':
             print(f"  [DataType] {decl['nome']} com {len(decl['atributos'])} atributos (linha {decl['linha']})")
-
+        elif decl['tipo_declaracao'] == 'relacao_externa':
+            print(f"  [Relação Externa] @{decl['estereotipo']} {decl['dominio']} {decl['cardinalidade_dominio']} -- {decl['nome_relacao']} -- {decl['cardinalidade_imagem']} {decl['imagem']} (linha {decl['linha']})")
+            
     print('Analise sintatica concluida com sucesso.')

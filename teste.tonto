@@ -1,7 +1,0 @@
-package MeuModelo
-
-kind Person {
-    has_parent
-}
-
-Planeta1
