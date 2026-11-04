@@ -1,4 +1,3 @@
-
 import sys
 import ply.yacc as yacc
 from lexer import tokens, build_lexer, find_column
@@ -6,8 +5,6 @@ from lexer import tokens, build_lexer, find_column
 start = 'document'
 codigo_fonte = ''
 
-
-# No documento já temos importacoes, pacote e declaracoes
 def p_document(p):
     'document : imports KW_PACKAGE package_name declarations'
     p[0] = {
@@ -21,11 +18,9 @@ def p_imports(p):
                | empty'''
     p[0] = p[1] + [p[2]] if len(p) == 3 else []
 
-
 def p_import_decl(p):
     'import_decl : KW_IMPORT package_name'
     p[0] = p[2]
-
 
 def p_package_name(p):
     '''package_name : CLASS_NAME
@@ -34,18 +29,20 @@ def p_package_name(p):
 
 def p_declarations(p):
     '''declarations : declarations declaration
-                | empty'''
+                    | empty'''
     p[0] = p[1] + [p[2]] if len(p) == 3 else []
 
-# Direciona para o tipo específico a ser tratado
 def p_declaration(p):
     '''declaration : class_decl
-               | enum_decl
-               | datatype_decl
-               | external_relation'''
+                   | enum_decl
+                   | datatype_decl
+                   | external_relation
+                   | genset_decl'''
     p[0] = p[1]
 
-# Cada classe possui estereotipo, nome, superclasse opcional e corpo
+# ==========================================
+# CLASSES
+# ==========================================
 def p_class_decl(p):
     'class_decl : class_stereotype CLASS_NAME superclass_opt class_body_opt'
     p[0] = {
@@ -57,8 +54,11 @@ def p_class_decl(p):
         'linha': p.lineno(1)
     }
 
+# ==========================================
+# ENUMS (Atualizado para aceitar qualquer nome)
+# ==========================================
 def p_enum_decl(p):
-    'enum_decl : KW_ENUM CLASS_NAME LBRACE enum_values RBRACE'
+    'enum_decl : KW_ENUM CLASS_NAME LBRACE enum_values_opt RBRACE'
     p[0] = {
         'tipo_declaracao': 'enum',
         'nome': p[2],
@@ -66,13 +66,26 @@ def p_enum_decl(p):
         'linha': p.lineno(1)
     }
 
-def p_enum_values(p):
-    '''enum_values : enum_values COMMA INSTANCE_NAME
-                    | INSTANCE_NAME'''
-    p[0] =p[1] + [p[3]] if len(p) == 4 else [p[1]]
+def p_enum_values_opt(p):
+    '''enum_values_opt : enum_values
+                       | empty'''
+    p[0] = p[1] if p[1] else []
 
+def p_enum_values(p):
+    '''enum_values : enum_values COMMA enum_val
+                   | enum_val'''
+    p[0] = p[1] + [p[3]] if len(p) == 4 else [p[1]]
+
+def p_enum_val(p):
+    '''enum_val : CLASS_NAME
+                | RELATION_NAME'''
+    p[0] = p[1]
+
+# ==========================================
+# DATATYPES
+# ==========================================
 def p_datatype_decl(p):
-    'datatype_decl : KW_DATATYPE CUSTOM_DATATYPE LBRACE attributes_opt RBRACE'
+    'datatype_decl : KW_DATATYPE CLASS_NAME LBRACE attributes_opt RBRACE'
     p[0] = {
         'tipo_declaracao': 'datatype',
         'nome': p[2],
@@ -80,9 +93,52 @@ def p_datatype_decl(p):
         'linha': p.lineno(1)
     }
 
+# ==========================================
+# CONJUNTOS DE GENERALIZAÇÃO (Gensets)
+# ==========================================
+def p_genset_decl_2_mods(p):
+    '''genset_decl : KW_DISJOINT KW_COMPLETE KW_GENSET CLASS_NAME LBRACE KW_GENERAL CLASS_NAME KW_SPECIFICS class_list RBRACE
+                   | KW_COMPLETE KW_DISJOINT KW_GENSET CLASS_NAME LBRACE KW_GENERAL CLASS_NAME KW_SPECIFICS class_list RBRACE'''
+    p[0] = {
+        'tipo_declaracao': 'genset',
+        'nome': p[4],
+        'modificadores': [p[1], p[2]],
+        'geral': p[7],
+        'especificas': p[9],
+        'linha': p.lineno(3)
+    }
 
+def p_genset_decl_1_mod(p):
+    '''genset_decl : KW_DISJOINT KW_GENSET CLASS_NAME LBRACE KW_GENERAL CLASS_NAME KW_SPECIFICS class_list RBRACE
+                   | KW_COMPLETE KW_GENSET CLASS_NAME LBRACE KW_GENERAL CLASS_NAME KW_SPECIFICS class_list RBRACE'''
+    p[0] = {
+        'tipo_declaracao': 'genset',
+        'nome': p[3],
+        'modificadores': [p[1]],
+        'geral': p[6],
+        'especificas': p[8],
+        'linha': p.lineno(2)
+    }
 
-# Estereotipos aceitos nas declaracoes de classes
+def p_genset_decl_0_mod(p):
+    '''genset_decl : KW_GENSET CLASS_NAME LBRACE KW_GENERAL CLASS_NAME KW_SPECIFICS class_list RBRACE'''
+    p[0] = {
+        'tipo_declaracao': 'genset',
+        'nome': p[2],
+        'modificadores': [],
+        'geral': p[5],
+        'especificas': p[7],
+        'linha': p.lineno(1)
+    }
+
+def p_class_list(p):
+    '''class_list : class_list COMMA CLASS_NAME
+                  | CLASS_NAME'''
+    p[0] = p[1] + [p[3]] if len(p) == 4 else [p[1]]
+
+# ==========================================
+# ESTEREÓTIPOS E HERANÇA
+# ==========================================
 def p_class_stereotype(p):
     '''class_stereotype : ST_EVENT
                         | ST_SITUATION
@@ -106,15 +162,11 @@ def p_class_stereotype(p):
                         | ST_HISTORICAL_ROLE'''
     p[0] = p[1]
 
-
-# Reconhece a especializacao de uma classe
 def p_superclass_opt(p):
     '''superclass_opt : KW_SPECIALIZES CLASS_NAME
                       | empty'''
     p[0] = p[2] if len(p) == 3 else None
 
-
-# Permite classes sem corpo ou com chaves vazias
 def p_class_body_opt(p):
     '''class_body_opt : LBRACE attributes_opt RBRACE
                       | empty'''
@@ -122,18 +174,17 @@ def p_class_body_opt(p):
 
 def p_attributes_opt(p):
     '''attributes_opt : attributes
-                     | empty'''
+                      | empty'''
     p[0] = p[1] if p[1] else [] 
     
 def p_attributes(p):
     '''attributes : attributes class_item
-                 | class_item'''     
+                  | class_item'''     
     p[0] = p[1] + [p[2]] if len(p) == 3 else [p[1]]
 
 def p_class_item(p):
     '''class_item : attribute
-                | internal__relation'''
-
+                  | internal_relation'''
     p[0] = p[1]
 
 def p_attribute(p):
@@ -144,7 +195,9 @@ def p_attribute(p):
         'meta': p[4]
     }
 
-# Relacao Interna (dentro das chaves de uma classe)
+# ==========================================
+# RELAÇÕES E CARDINALIDADES
+# ==========================================
 def p_internal_relation(p):
     'internal_relation : AT relation_stereotype cardinality relation_sym cardinality CLASS_NAME'
     p[0] = { 
@@ -156,17 +209,16 @@ def p_internal_relation(p):
         'destino': p[6]
     }
 
-# Relacao Externa (escopo global)
 def p_external_relation(p):
-    'external_relation : AT relation_stereotype KW_RELATION CLASS_NAME cardinality relation_sym cardinality CLASS_NAME'
+    'external_relation : AT relation_stereotype KW_RELATION CLASS_NAME cardinality relation_sym RELATION_NAME relation_sym cardinality CLASS_NAME'
     p[0] = {
         'tipo_declaracao': 'relacao_externa',
         'estereotipo': p[2],
         'dominio': p[4],
         'cardinalidade_dominio': p[5],
-        'simbolo': p[6],
-        'cardinalidade_imagem': p[7],
-        'imagem': p[8],
+        'nome_relacao': p[7],
+        'cardinalidade_imagem': p[9],
+        'imagem': p[10],
         'linha': p.lineno(1)
     }
 
@@ -186,7 +238,6 @@ def p_relation_sym(p):
                     | DASH'''
     p[0] = p[1]
 
-# Uma amostra dos estereotipos de relacao (adicione os demais do seu Lexer se faltar algum)
 def p_relation_stereotype(p):
     '''relation_stereotype : ST_COMPONENT_OF
                            | ST_MEDIATION
@@ -215,15 +266,17 @@ def p_relation_stereotype(p):
                            | ST_CONSTITUTION'''
     p[0] = p[1]
 
+# ==========================================
+# TIPOS E METADADOS
+# ==========================================
 def p_data_type(p):
     '''data_type : TYPE_NUMBER
-                    | TYPE_STRING
-                    | TYPE_BOOLEAN
-                    | TYPE_DATE
-                    | TYPE_TIME
-                    | TYPE_DATETIME
-                    | CUSTOM_DATATYPE
-                    | CLASS_NAME'''  
+                 | TYPE_STRING
+                 | TYPE_BOOLEAN
+                 | TYPE_DATE
+                 | TYPE_TIME
+                 | TYPE_DATETIME
+                 | CLASS_NAME'''  
     p[0] = p[1]  
 
 def p_meta_opt(p):
@@ -248,41 +301,28 @@ def p_empty(p):
     'empty :'
     p[0] = None
 
-
+# ==========================================
+# TRATAMENTO DE ERROS E EXECUÇÃO
+# ==========================================
 class ErroSintatico(Exception):
     pass
 
-
-# Identifica o primeiro erro sintatico encontrado
 def p_error(p):
     if p is None:
         print('Erro sintatico: fim inesperado do arquivo.')
     else:
         coluna = find_column(codigo_fonte, p)
-        print(
-            f"Erro sintatico na linha {p.lineno}, "
-            f"coluna {coluna}: token '{p.value}' inesperado."
-        )
-
+        print(f"Erro sintatico na linha {p.lineno}, coluna {coluna}: token '{p.value}' inesperado.")
     raise ErroSintatico()
 
+# Setup usando tabmodule exclusivo para evitar o cache!
+parser = yacc.yacc(debug=False, write_tables=False, tabmodule="tonto_parser_tab", errorlog=yacc.NullLogger())
 
-# Constroi o analisador sintatico
-parser = yacc.yacc(
-    debug=False,
-    write_tables=False,
-    errorlog=yacc.NullLogger()
-)
-
-
-# Executa a analise utilizando os tokens do lexer
 def analisar(texto):
     global codigo_fonte
     codigo_fonte = texto
-
     scanner = build_lexer()
     return parser.parse(texto, lexer=scanner, tracking=True)
-
 
 if __name__ == '__main__':
     if len(sys.argv) != 2:
@@ -302,30 +342,28 @@ if __name__ == '__main__':
         sys.exit(1)
 
     print(f"Pacote reconhecido: {resultado['pacote']}")
-    print(
-        f"Importacoes reconhecidas: "
-        f"{', '.join(resultado['imports']) or 'nenhuma'}"
-    )
+    print(f"Importacoes reconhecidas: {', '.join(resultado['imports']) or 'nenhuma'}")
     print(f"Declaracoes reconhecidas: {len(resultado['declaracoes'])}")
 
     for decl in resultado['declaracoes']:
         if decl['tipo_declaracao'] == 'classe':
-            superclasse = (
-                f" specializes {decl['superclasse']}"
-                if decl['superclasse'] else ''
-            )
-            print(
-                f"  [Classe] {decl['estereotipo']} "
-                f"{decl['nome']}{superclasse} "
-                f"(linha {decl['linha']})"
-            )
-        
+            superclasse = f" specializes {decl['superclasse']}" if decl['superclasse'] else ''
+            print(f"  [Classe] {decl['estereotipo']} {decl['nome']}{superclasse} (linha {decl['linha']})")
+            
         elif decl['tipo_declaracao'] == 'enum':
             print(f"  [Enum] {decl['nome']} com {len(decl['valores'])} valores (linha {decl['linha']})")
-        
+            
         elif decl['tipo_declaracao'] == 'datatype':
             print(f"  [DataType] {decl['nome']} com {len(decl['atributos'])} atributos (linha {decl['linha']})")
+            
         elif decl['tipo_declaracao'] == 'relacao_externa':
             print(f"  [Relação Externa] @{decl['estereotipo']} {decl['dominio']} {decl['cardinalidade_dominio']} -- {decl['nome_relacao']} -- {decl['cardinalidade_imagem']} {decl['imagem']} (linha {decl['linha']})")
             
-    print('Analise sintatica concluida com sucesso.')
+        elif decl['tipo_declaracao'] == 'genset':
+            mods = " ".join(decl['modificadores'])
+            if mods:
+                print(f"  [Genset] {mods} genset {decl['nome']} (Geral: {decl['geral']}, Específicas: {', '.join(decl['especificas'])}) (linha {decl['linha']})")
+            else:
+                print(f"  [Genset] genset {decl['nome']} (Geral: {decl['geral']}, Específicas: {', '.join(decl['especificas'])}) (linha {decl['linha']})")
+
+    print('\nAnalise sintatica concluida com sucesso.')
