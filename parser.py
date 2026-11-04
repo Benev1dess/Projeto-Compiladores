@@ -44,15 +44,24 @@ def p_declaration(p):
                | datatype_decl'''
     p[0] = p[1]
 
-# Cada classe possui estereotipo, nome e superclasse opcional
+# Cada classe possui estereotipo, nome, superclasse opcional e corpo
 def p_class_decl(p):
-    'class_decl : KW_ENUM CLASS_NAME enum_values RBRACE'
-
+    'class_decl : class_stereotype CLASS_NAME superclass_opt class_body_opt'
     p[0] = {
-        'tipo_declaracao': 'enum',
+        'tipo_declaracao': 'classe',
         'nome': p[2],
         'estereotipo': p[1],
         'superclasse': p[3],
+        'atributos': p[4],
+        'linha': p.lineno(1)
+    }
+
+def p_enum_decl(p):
+    'enum_decl : KW_ENUM CLASS_NAME LBRACE enum_values RBRACE'
+    p[0] = {
+        'tipo_declaracao': 'enum',
+        'nome': p[2],
+        'valores': p[4],
         'linha': p.lineno(1)
     }
 
@@ -106,10 +115,56 @@ def p_superclass_opt(p):
 
 # Permite classes sem corpo ou com chaves vazias
 def p_class_body_opt(p):
-    '''class_body_opt : LBRACE RBRACE
+    '''class_body_opt : LBRACE attributes_opt RBRACE
                       | empty'''
-    p[0] = None
+    p[0] = p[2] if len(p) == 4 else []
 
+def p_attributes_opt(p):
+    '''attributes_opt : attributes
+                     | empty'''
+    p[0] = p[1] if p[1] else [] 
+    
+def p_attributes(p):
+    '''attributes : attributes attribute 
+                 | attribute'''     
+    p[0] = p[1] + [p[2]] if len(p) == 3 else [p[1]]
+
+def p_attribute(p):
+    'attribute : RELATION_NAME COLON data_type meta_opt'
+    p[0] = { 
+        'nome': p[1],
+        'tipo_dado': p[3],
+        'meta': p[4]
+    }
+
+def p_data_type(p):
+    '''data_type : TYPE_NUMBER
+                    | TYPE_STRING
+                    | TYPE_BOOLEAN
+                    | TYPE_DATE
+                    | TYPE_TIME
+                    | TYPE_DATETIME
+                    | CUSTOM_DATATYPE
+                    | CLASS_NAME'''  
+    p[0] = p[1]  
+
+def p_meta_opt(p):
+    '''meta_opt : LBRACE meta_list RBRACE
+                | empty'''
+    p[0] = p[2] if len(p) == 4 else []
+
+def p_meta_list(p):
+    '''meta_list : meta_list COMMA meta_attr
+                 | meta_attr'''
+    p[0] = p[1] + [p[3]] if len(p) == 4 else [p[1]]
+
+def p_meta_attr(p):
+    '''meta_attr : META_ORDERED
+                 | META_CONST
+                 | META_DERIVED
+                 | META_SUBSETS
+                 | META_REDEFINES'''
+    p[0] = p[1]
 
 def p_empty(p):
     'empty :'
@@ -173,18 +228,24 @@ if __name__ == '__main__':
         f"Importacoes reconhecidas: "
         f"{', '.join(resultado['imports']) or 'nenhuma'}"
     )
-    print(f"Classes reconhecidas: {len(resultado['classes'])}")
+    print(f"Declaracoes reconhecidas: {len(resultado['declaracoes'])}")
 
-    for classe in resultado['classes']:
-        superclasse = (
-            f" specializes {classe['superclasse']}"
-            if classe['superclasse'] else ''
-        )
-
-        print(
-            f"  {classe['estereotipo']} "
-            f"{classe['nome']}{superclasse} "
-            f"(linha {classe['linha']})"
-        )
+    for decl in resultado['declaracoes']:
+        if decl['tipo_declaracao'] == 'classe':
+            superclasse = (
+                f" specializes {decl['superclasse']}"
+                if decl['superclasse'] else ''
+            )
+            print(
+                f"  [Classe] {decl['estereotipo']} "
+                f"{decl['nome']}{superclasse} "
+                f"(linha {decl['linha']})"
+            )
+        
+        elif decl['tipo_declaracao'] == 'enum':
+            print(f"  [Enum] {decl['nome']} com {len(decl['valores'])} valores (linha {decl['linha']})")
+        
+        elif decl['tipo_declaracao'] == 'datatype':
+            print(f"  [DataType] {decl['nome']} com {len(decl['atributos'])} atributos (linha {decl['linha']})")
 
     print('Analise sintatica concluida com sucesso.')
