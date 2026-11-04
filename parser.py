@@ -5,6 +5,10 @@ from lexer import tokens, build_lexer, find_column
 start = 'document'
 codigo_fonte = ''
 
+# ==========================================
+# ESTRUTURA PRINCIPAL DO DOCUMENTO
+# ==========================================
+
 def p_document(p):
     'document : imports KW_PACKAGE package_name declarations'
     p[0] = {
@@ -41,22 +45,98 @@ def p_declaration(p):
     p[0] = p[1]
 
 # ==========================================
-# CLASSES
+# CLASSES E ATRIBUTOS
 # ==========================================
+
 def p_class_decl(p):
-    'class_decl : class_stereotype CLASS_NAME superclass_opt class_body_opt'
+    'class_decl : class_stereotype CLASS_NAME of_clause_opt superclass_opt class_body_opt'
     p[0] = {
         'tipo_declaracao': 'classe',
         'nome': p[2],
         'estereotipo': p[1],
-        'superclasse': p[3],
-        'atributos': p[4],
+        'of_clause': p[3],
+        'superclasse': p[4],
+        'atributos': p[5],
         'linha': p.lineno(1)
     }
 
+def p_of_clause_opt(p):
+    '''of_clause_opt : RELATION_NAME of_target
+                     | empty'''
+    p[0] = p[2] if len(p) == 3 and p[1] == 'of' else None
+
+def p_of_target(p):
+    '''of_target : RELATION_NAME
+                 | CLASS_NAME
+                 | DASH_IDENTIFIER'''
+    p[0] = p[1]
+
+def p_class_stereotype(p):
+    '''class_stereotype : ST_EVENT
+                        | ST_SITUATION
+                        | ST_PROCESS
+                        | ST_CATEGORY
+                        | ST_MIXIN
+                        | ST_PHASE_MIXIN
+                        | ST_ROLE_MIXIN
+                        | ST_HISTORICAL_ROLE_MIXIN
+                        | ST_KIND
+                        | ST_RELATOR
+                        | ST_COLLECTIVE
+                        | ST_QUANTITY
+                        | ST_QUALITY
+                        | ST_MODE
+                        | ST_INTRINSIC_MODE
+                        | ST_EXTRINSIC_MODE
+                        | ST_SUBKIND
+                        | ST_PHASE
+                        | ST_ROLE
+                        | ST_HISTORICAL_ROLE'''
+    p[0] = p[1]
+
+def p_superclass_opt(p):
+    '''superclass_opt : KW_SPECIALIZES class_list
+                      | empty'''
+    p[0] = p[2] if len(p) == 3 else []
+
+def p_class_body_opt(p):
+    '''class_body_opt : LBRACE attributes_opt RBRACE
+                      | empty'''
+    p[0] = p[2] if len(p) == 4 else []
+
+def p_attributes_opt(p):
+    '''attributes_opt : attributes
+                      | empty'''
+    p[0] = p[1] if p[1] else [] 
+    
+def p_attributes(p):
+    '''attributes : attributes class_item
+                  | class_item'''     
+    p[0] = p[1] + [p[2]] if len(p) == 3 else [p[1]]
+
+def p_class_item(p):
+    '''class_item : attribute
+                  | internal_relation'''
+    p[0] = p[1]
+
+def p_attribute(p):
+    'attribute : RELATION_NAME COLON data_type cardinality_opt meta_opt'
+    p[0] = { 
+        'nome': p[1],
+        'tipo_dado': p[3],
+        'cardinalidade': p[4],
+        'meta': p[5]
+    }
+
+def p_cardinality_opt(p):
+    '''cardinality_opt : cardinality
+                       | empty'''
+    p[0] = p[1]
+
 # ==========================================
-# ENUMS (Atualizado para aceitar qualquer nome)
+# ENUMS
 # ==========================================
+
 def p_enum_decl(p):
     'enum_decl : KW_ENUM CLASS_NAME LBRACE enum_values_opt RBRACE'
     p[0] = {
@@ -84,6 +164,7 @@ def p_enum_val(p):
 # ==========================================
 # DATATYPES
 # ==========================================
+
 def p_datatype_decl(p):
     'datatype_decl : KW_DATATYPE CLASS_NAME LBRACE attributes_opt RBRACE'
     p[0] = {
@@ -96,9 +177,15 @@ def p_datatype_decl(p):
 # ==========================================
 # CONJUNTOS DE GENERALIZAÇÃO (Gensets)
 # ==========================================
+
+def p_genset_name(p):
+    '''genset_name : CLASS_NAME
+                   | RELATION_NAME'''
+    p[0] = p[1]
+
 def p_genset_decl_2_mods(p):
-    '''genset_decl : KW_DISJOINT KW_COMPLETE KW_GENSET CLASS_NAME LBRACE KW_GENERAL CLASS_NAME KW_SPECIFICS class_list RBRACE
-                   | KW_COMPLETE KW_DISJOINT KW_GENSET CLASS_NAME LBRACE KW_GENERAL CLASS_NAME KW_SPECIFICS class_list RBRACE'''
+    '''genset_decl : KW_DISJOINT KW_COMPLETE KW_GENSET genset_name LBRACE KW_GENERAL CLASS_NAME KW_SPECIFICS class_list RBRACE
+                   | KW_COMPLETE KW_DISJOINT KW_GENSET genset_name LBRACE KW_GENERAL CLASS_NAME KW_SPECIFICS class_list RBRACE'''
     p[0] = {
         'tipo_declaracao': 'genset',
         'nome': p[4],
@@ -109,8 +196,8 @@ def p_genset_decl_2_mods(p):
     }
 
 def p_genset_decl_1_mod(p):
-    '''genset_decl : KW_DISJOINT KW_GENSET CLASS_NAME LBRACE KW_GENERAL CLASS_NAME KW_SPECIFICS class_list RBRACE
-                   | KW_COMPLETE KW_GENSET CLASS_NAME LBRACE KW_GENERAL CLASS_NAME KW_SPECIFICS class_list RBRACE'''
+    '''genset_decl : KW_DISJOINT KW_GENSET genset_name LBRACE KW_GENERAL CLASS_NAME KW_SPECIFICS class_list RBRACE
+                   | KW_COMPLETE KW_GENSET genset_name LBRACE KW_GENERAL CLASS_NAME KW_SPECIFICS class_list RBRACE'''
     p[0] = {
         'tipo_declaracao': 'genset',
         'nome': p[3],
@@ -121,7 +208,7 @@ def p_genset_decl_1_mod(p):
     }
 
 def p_genset_decl_0_mod(p):
-    '''genset_decl : KW_GENSET CLASS_NAME LBRACE KW_GENERAL CLASS_NAME KW_SPECIFICS class_list RBRACE'''
+    '''genset_decl : KW_GENSET genset_name LBRACE KW_GENERAL CLASS_NAME KW_SPECIFICS class_list RBRACE'''
     p[0] = {
         'tipo_declaracao': 'genset',
         'nome': p[2],
@@ -137,77 +224,79 @@ def p_class_list(p):
     p[0] = p[1] + [p[3]] if len(p) == 4 else [p[1]]
 
 # ==========================================
-# ESTEREÓTIPOS E HERANÇA
+# RELAÇÕES INTERNAS (Suporte com e sem estereótipo '@')
 # ==========================================
-def p_class_stereotype(p):
-    '''class_stereotype : ST_EVENT
-                        | ST_SITUATION
-                        | ST_PROCESS
-                        | ST_CATEGORY
-                        | ST_MIXIN
-                        | ST_PHASE_MIXIN
-                        | ST_ROLE_MIXIN
-                        | ST_HISTORICAL_ROLE_MIXIN
-                        | ST_KIND
-                        | ST_RELATOR
-                        | ST_COLLECTIVE
-                        | ST_QUANTITY
-                        | ST_QUALITY
-                        | ST_MODE
-                        | ST_INTRINSIC_MODE
-                        | ST_EXTRINSIC_MODE
-                        | ST_SUBKIND
-                        | ST_PHASE
-                        | ST_ROLE
-                        | ST_HISTORICAL_ROLE'''
-    p[0] = p[1]
 
-def p_superclass_opt(p):
-    '''superclass_opt : KW_SPECIALIZES CLASS_NAME
-                      | empty'''
-    p[0] = p[2] if len(p) == 3 else None
+# Formato: @mediation -- involvesOwner -- [1] CarAgency OU -- involvesOwner -- [1] CarAgency
+def p_internal_relation_named(p):
+    '''internal_relation : AT relation_stereotype relation_sym RELATION_NAME relation_sym cardinality CLASS_NAME
+                         | relation_sym RELATION_NAME relation_sym cardinality CLASS_NAME'''
+    if len(p) == 8:
+        p[0] = {
+            'tipo_item': 'relacao_interna',
+            'estereotipo': p[2],
+            'nome_relacao': p[4],
+            'cardinalidade_destino': p[6],
+            'destino': p[7]
+        }
+    else:
+        p[0] = {
+            'tipo_item': 'relacao_interna',
+            'estereotipo': None,
+            'nome_relacao': p[2],
+            'cardinalidade_destino': p[4],
+            'destino': p[5]
+        }
 
-def p_class_body_opt(p):
-    '''class_body_opt : LBRACE attributes_opt RBRACE
-                      | empty'''
-    p[0] = p[2] if len(p) == 4 else []
+# Formato: @mediation [1] <>-- [1..*] CarAgency OU [1] <>-- [1..*] CarAgency
+def p_internal_relation_unnamed(p):
+    '''internal_relation : AT relation_stereotype cardinality relation_sym cardinality CLASS_NAME
+                         | cardinality relation_sym cardinality CLASS_NAME'''
+    if len(p) == 7:
+        p[0] = { 
+            'tipo_item': 'relacao_interna',
+            'estereotipo': p[2],
+            'cardinalidade_origem': p[3],
+            'simbolo': p[4],
+            'cardinalidade_destino': p[5],
+            'destino': p[6]
+        }
+    else:
+        p[0] = { 
+            'tipo_item': 'relacao_interna',
+            'estereotipo': None,
+            'cardinalidade_origem': p[1],
+            'simbolo': p[2],
+            'cardinalidade_destino': p[3],
+            'destino': p[4]
+        }
 
-def p_attributes_opt(p):
-    '''attributes_opt : attributes
-                      | empty'''
-    p[0] = p[1] if p[1] else [] 
-    
-def p_attributes(p):
-    '''attributes : attributes class_item
-                  | class_item'''     
-    p[0] = p[1] + [p[2]] if len(p) == 3 else [p[1]]
-
-def p_class_item(p):
-    '''class_item : attribute
-                  | internal_relation'''
-    p[0] = p[1]
-
-def p_attribute(p):
-    'attribute : RELATION_NAME COLON data_type meta_opt'
-    p[0] = { 
-        'nome': p[1],
-        'tipo_dado': p[3],
-        'meta': p[4]
-    }
+# Formato: @mediation [1] -- involvesOwner -- [1..*] CarAgency OU [1] -- involvesOwner -- [1..*] CarAgency
+def p_internal_relation_full(p):
+    '''internal_relation : AT relation_stereotype cardinality relation_sym RELATION_NAME relation_sym cardinality CLASS_NAME
+                         | cardinality relation_sym RELATION_NAME relation_sym cardinality CLASS_NAME'''
+    if len(p) == 9:
+        p[0] = { 
+            'tipo_item': 'relacao_interna',
+            'estereotipo': p[2],
+            'cardinalidade_origem': p[3],
+            'nome_relacao': p[5],
+            'cardinalidade_destino': p[7],
+            'destino': p[8]
+        }
+    else:
+        p[0] = { 
+            'tipo_item': 'relacao_interna',
+            'estereotipo': None,
+            'cardinalidade_origem': p[1],
+            'nome_relacao': p[3],
+            'cardinalidade_destino': p[5],
+            'destino': p[6]
+        }
 
 # ==========================================
-# RELAÇÕES E CARDINALIDADES
+# RELAÇÕES EXTERNAS E COMPONENTES
 # ==========================================
-def p_internal_relation(p):
-    'internal_relation : AT relation_stereotype cardinality relation_sym cardinality CLASS_NAME'
-    p[0] = { 
-        'tipo_item': 'relacao_interna',
-        'estereotipo': p[2],
-        'cardinalidade_origem': p[3],
-        'simbolo': p[4],
-        'cardinalidade_destino': p[5],
-        'destino': p[6]
-    }
 
 def p_external_relation(p):
     'external_relation : AT relation_stereotype KW_RELATION CLASS_NAME cardinality relation_sym RELATION_NAME relation_sym cardinality CLASS_NAME'
@@ -269,6 +358,7 @@ def p_relation_stereotype(p):
 # ==========================================
 # TIPOS E METADADOS
 # ==========================================
+
 def p_data_type(p):
     '''data_type : TYPE_NUMBER
                  | TYPE_STRING
@@ -304,6 +394,7 @@ def p_empty(p):
 # ==========================================
 # TRATAMENTO DE ERROS E EXECUÇÃO
 # ==========================================
+
 class ErroSintatico(Exception):
     pass
 
@@ -315,8 +406,8 @@ def p_error(p):
         print(f"Erro sintatico na linha {p.lineno}, coluna {coluna}: token '{p.value}' inesperado.")
     raise ErroSintatico()
 
-# Setup usando tabmodule exclusivo para evitar o cache!
-parser = yacc.yacc(debug=False, write_tables=False, tabmodule="tonto_parser_tab", errorlog=yacc.NullLogger())
+# Força a geração limpa sem tabelas persistentes no disco
+parser = yacc.yacc(debug=False, write_tables=False, errorlog=yacc.NullLogger())
 
 def analisar(texto):
     global codigo_fonte
@@ -347,8 +438,9 @@ if __name__ == '__main__':
 
     for decl in resultado['declaracoes']:
         if decl['tipo_declaracao'] == 'classe':
-            superclasse = f" specializes {decl['superclasse']}" if decl['superclasse'] else ''
-            print(f"  [Classe] {decl['estereotipo']} {decl['nome']}{superclasse} (linha {decl['linha']})")
+            superclasse = f" specializes {', '.join(decl['superclasse'])}" if decl['superclasse'] else ''
+            of_info = f" of {decl['of_clause']}" if decl['of_clause'] else ''
+            print(f"  [Classe] {decl['estereotipo']} {decl['nome']}{of_info}{superclasse} (linha {decl['linha']})")
             
         elif decl['tipo_declaracao'] == 'enum':
             print(f"  [Enum] {decl['nome']} com {len(decl['valores'])} valores (linha {decl['linha']})")
