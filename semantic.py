@@ -1,0 +1,350 @@
+import sys
+from collections import defaultdict
+
+
+GENSET_RULES = {
+    'subkind':   {'disjoint': 'obrigatorio', 'complete': 'opcional'},
+    'role':      {'disjoint': 'proibido',    'complete': 'opcional'},
+    'phase':     {'disjoint': 'obrigatorio', 'complete': 'opcional'},
+    'rolemixin': {'disjoint': 'obrigatorio', 'complete': 'obrigatorio'},
+}
+ROTULO = {
+    'subkind': 'Subkind Pattern', 'role': 'Role Pattern',
+    'phase': 'Phase Pattern', 'rolemixin': 'RoleMixin Pattern',
+}
+NOME_CURTO = {'subkind': 'Subkind', 'role': 'Role', 'phase': 'Phase',
+              'rolemixin': 'RoleMixin'}
+
+NATIVOS = {'number', 'string', 'boolean', 'date', 'time', 'datetime'}
+RIGIDOS = {'kind', 'subkind', 'collective', 'quantity', 'relator', 'mode',
+           'quality', 'category', 'intrinsicMode', 'extrinsicMode'}
+ANTI_RIGIDOS = {'role', 'phase', 'roleMixin', 'phaseMixin',
+                'historicalRole', 'historicalRoleMixin'}
+SORTAIS_DEPENDENTES = {'subkind', 'role', 'phase'}
+
+
+def limite_inferior(card):
+    """'1..*' -> 1 ; '*' -> 0 ; '0..1' -> 0 ; None -> None"""
+    if card is None:
+        return None
+    base = str(card).split('..')[0]
+    return 0 if base == '*' else int(base)
+
+
+class Achado:
+    def __init__(self, linhas, titulo, detalhe='', sugestao='', sev=''):
+        self.linhas = sorted({l for l in linhas if l})
+        self.titulo = titulo
+        self.detalhe = detalhe
+        self.sugestao = sugestao
+        self.sev = sev
+
+    @property
+    def ordem(self):
+        return self.linhas[0] if self.linhas else 0
+
+    def rotulo_linhas(self):
+        return 'L' + ','.join(map(str, self.linhas)) if self.linhas else 'L?'
+
+class Modelo:
+    def __init__(self, ast):
+        self.pacote = ast['pacote']
+        self.imports = ast['imports']
+        self.classes = {}          # nome -> declaração
+        self.duplicadas = []
+        self.enums, self.datatypes = {}, {}
+        self.gensets, self.relacoes_externas = [], []
+
+        for d in ast['declaracoes']:
+            t = d['tipo_declaracao']
+            if t == 'classe':
+                if d['nome'] in self.classes:
+                    self.duplicadas.append(d)
+                else:
+                    self.classes[d['nome']] = d
+            elif t == 'enum':
+                self.enums[d['nome']] = d
+            elif t == 'datatype':
+                self.datatypes[d['nome']] = d
+            elif t == 'genset':
+                self.gensets.append(d)
+            elif t == 'relacao_externa':
+                self.relacoes_externas.append(d)
+
+        # genset também declara generalização
+        self.pais_genset = defaultdict(list)
+        for g in self.gensets:
+            for e in g['especificas']:
+                self.pais_genset[e].append(g['geral'])
+
+    def est(self, nome):
+        c = self.classes.get(nome)
+        return c['estereotipo'] if c else None
+
+    def linha(self, nome):
+        c = self.classes.get(nome)
+        return c['linha'] if c else 0
+
+    def pais(self, nome):
+        """Pais efetivos = 'specializes' declarado + gensets em que é específica."""
+        c = self.classes.get(nome)
+        declarados = c['superclasse'] if c else []
+        return list(dict.fromkeys(declarados + self.pais_genset.get(nome, [])))
+
+    def filhos_de(self, pai, estereotipo):
+        return [n for n, c in self.classes.items()
+                if c['estereotipo'] == estereotipo and pai in self.pais(n)]
+
+    def com_estereotipo(self, estereotipo):
+        return [n for n, c in self.classes.items()
+                if c['estereotipo'] == estereotipo]
+
+    @staticmethod
+    def relacoes(classe, estereotipo=None):
+        return [a for a in classe['atributos']
+                if a.get('tipo_item') == 'relacao_interna'
+                and (estereotipo is None or a.get('estereotipo') == estereotipo)]
+
+
+class Analisador:
+    def __init__(self, ast):
+        self.m = Modelo(ast)
+        self.padroes, self.erros, self.incompletos = [], [], []
+        self.erros_por_genset = defaultdict(int)
+
+    def _erro(self, linhas, titulo, sugestao='', sev='ERRO', genset=None):
+        self.erros.append(Achado(linhas, titulo, sugestao=sugestao, sev=sev))
+        if genset is not None and sev == 'ERRO':
+            self.erros_por_genset[id(genset)] += 1
+
+    def _incompleto(self, linhas, titulo, sugestao=''):
+        self.incompletos.append(Achado(linhas, titulo, sugestao=sugestao))
+
+    def _padrao(self, linhas, titulo, detalhe=''):
+        self.padroes.append(Achado(linhas, titulo, detalhe=detalhe))
+
+    def _indefinido(self, nome, linha, contexto):
+        tem_imp = bool(self.m.imports)
+        self._erro([linha],
+                   f"'{nome}' ({contexto}) não foi declarado"
+                   + (" neste pacote (pode vir de um import)" if tem_imp else ""),
+                   "declare a classe neste pacote ou importe o pacote que a define",
+                   'AVISO' if tem_imp else 'ERRO')
+
+    def executar(self):
+        self.verificar_declaracoes()
+        for g in self.m.gensets:
+            self.verificar_genset(g)
+        self.padroes_sortais()
+        self.padrao_rolemixin()
+        self.padrao_relator()
+        self.padrao_mode()
+        for lista in (self.padroes, self.erros, self.incompletos):
+            lista.sort(key=lambda a: a.ordem)
+        return self
+
+    def verificar_declaracoes(self):
+        m = self.m
+
+        for d in m.duplicadas:
+            self._erro([d['linha'], m.linha(d['nome'])],
+                       f"Classe '{d['nome']}' declarada mais de uma vez",
+                       "renomeie ou remova uma das declarações")
+
+        vistos = {}
+        for g in m.gensets:
+            if g['nome'] in vistos:
+                self._erro([g['linha'], vistos[g['nome']]],
+                           f"Genset '{g['nome']}' declarado mais de uma vez",
+                           "use nomes distintos para cada genset")
+            vistos[g['nome']] = g['linha']
+
+        for nome, c in m.classes.items():
+            est = c['estereotipo']
+
+            for sup in c['superclasse']:
+                if sup not in m.classes:
+                    self._indefinido(sup, c['linha'], f"superclasse de '{nome}'")
+                elif est in RIGIDOS and m.est(sup) in ANTI_RIGIDOS:
+                    self._erro([c['linha']],
+                               f"'{nome}' ({est}, rígido) especializa '{sup}' "
+                               f"({m.est(sup)}, anti-rígido)",
+                               "um tipo rígido não pode especializar um anti-rígido; "
+                               "inverta a especialização ou ajuste o estereótipo")
+
+            if est in SORTAIS_DEPENDENTES and not m.pais(nome):
+                kinds = m.com_estereotipo('kind')
+                if len(kinds) == 1:
+                    sug = f"adicione 'specializes {kinds[0]}' (único kind do pacote)"
+                elif kinds:
+                    sug = f"adicione 'specializes <um de: {', '.join(kinds)}>'"
+                else:
+                    sug = "declare um kind e faça a classe especializá-lo"
+                self._erro([c['linha']],
+                           f"'{nome}' ({est}) não especializa nenhuma classe", sug)
+
+            for a in c['atributos']:
+                if a.get('tipo_item') == 'relacao_interna':
+                    if a['destino'] not in m.classes:
+                        self._indefinido(a['destino'], a.get('linha', c['linha']),
+                                         f"destino de relação em '{nome}'")
+                else:
+                    self._verificar_tipo_atributo(a, nome, c['linha'])
+
+        for nome, d in m.datatypes.items():
+            for a in d['atributos']:
+                if a.get('tipo_item') != 'relacao_interna':
+                    self._verificar_tipo_atributo(a, nome, d['linha'])
+
+        for r in m.relacoes_externas:
+            for lado in ('dominio', 'imagem'):
+                if r[lado] not in m.classes:
+                    self._indefinido(r[lado], r['linha'], f"{lado} de @{r['estereotipo']}")
+
+    def _verificar_tipo_atributo(self, attr, dono, linha):
+        t = attr['tipo_dado']
+        if t in NATIVOS or t in self.m.enums or t in self.m.datatypes:
+            return
+        self._indefinido(t, attr.get('linha', linha),
+                         f"tipo do atributo '{attr['nome']}' em '{dono}'")
+
+
+    def classificar(self, g):
+        """Qual ODP baseado em genset este genset instancia (ou None)."""
+        m = self.m
+        estg = m.est(g['geral'])
+        sp = {m.est(s) for s in g['especificas']}
+        if not sp or None in sp:
+            return None
+        if estg == 'kind' and len(sp) == 1:
+            x = next(iter(sp))
+            if x in ('subkind', 'role', 'phase'):
+                return x
+        if estg == 'roleMixin' and sp == {'role'}:
+            return 'rolemixin'
+        return None
+
+    def verificar_genset(self, g):
+        m = self.m
+        nome, geral, specs = g['nome'], g['geral'], g['especificas']
+        mods = set(g['modificadores'])
+        ln = g['linha']
+
+        if geral not in m.classes:
+            self._indefinido(geral, ln, f"general do genset '{nome}'")
+        for s in specs:
+            if s not in m.classes:
+                self._indefinido(s, ln, f"specific do genset '{nome}'")
+        if len(set(specs)) != len(specs):
+            self._erro([ln], f"Genset '{nome}' repete classes em 'specifics'",
+                       "liste cada classe específica uma única vez", genset=g)
+        if geral in specs:
+            self._erro([ln], f"Genset '{nome}': '{geral}' é general e specific ao mesmo tempo",
+                       "remova a classe de 'specifics'", genset=g)
+
+        padrao = self.classificar(g)
+
+        if padrao is None:
+            estg = m.est(geral)
+            sp = {m.est(s) for s in specs if m.est(s)}
+            if estg in ('kind', 'roleMixin') and sp:
+                permitido = {'kind': {'subkind', 'role', 'phase'},
+                             'roleMixin': {'role'}}[estg]
+                if estg == 'kind' and len(sp) > 1 and sp <= permitido:
+                    self._erro([ln], f"Genset '{nome}' mistura estereótipos "
+                                     f"({', '.join(sorted(sp))}) sob o kind '{geral}'",
+                               "separe em um genset por padrão (um para subkinds, "
+                               "outro para roles, outro para phases)", genset=g)
+                elif sp - permitido:
+                    ruins = [s for s in specs if m.est(s) in (sp - permitido)]
+                    self._erro([ln], f"Genset '{nome}': {', '.join(ruins)} não pode(m) "
+                                     f"especializar {estg} '{geral}' por este genset",
+                               f"specifics válidos para {estg}: {', '.join(sorted(permitido))}",
+                               genset=g)
+            return
+
+        regras = GENSET_RULES[padrao]
+        for mod in ('disjoint', 'complete'):
+            tem = mod in mods
+            if regras[mod] == 'obrigatorio' and not tem:
+                self._erro([ln], f"{ROTULO[padrao]}: genset '{nome}' sem '{mod}' "
+                                 f"({mod} é obrigatório neste padrão)",
+                           f"escreva '{mod} genset {nome} {{ ... }}'", genset=g)
+            if regras[mod] == 'proibido' and tem:
+                self._erro([ln], f"{ROTULO[padrao]}: genset '{nome}' usa '{mod}', "
+                                 f"que não se aplica a este padrão",
+                           f"remova '{mod}' do genset '{nome}'", genset=g)
+
+        if len(specs) < 2:
+            self._erro([ln], f"Genset '{nome}' tem só 1 classe específica; "
+                             f"um genset particiona em ao menos 2",
+                       "acrescente outra classe em 'specifics'", 'AVISO')
+
+        if padrao != 'rolemixin':     # no rolemixin, o genset é quem declara a generalização
+            for s in specs:
+                c = m.classes.get(s)
+                if c and c['superclasse'] and geral not in c['superclasse']:
+                    self._erro([ln, c['linha']],
+                               f"'{s}' declara 'specializes {', '.join(c['superclasse'])}' "
+                               f"mas o genset '{nome}' o coloca sob '{geral}'",
+                               f"troque para 'specializes {geral}'", genset=g)
+
+
+    def padroes_sortais(self):
+        m = self.m
+        for kind in m.com_estereotipo('kind'):
+            for tipo in ('subkind', 'role', 'phase'):
+                membros = m.filhos_de(kind, tipo)
+                if not membros:
+                    continue
+                gs = [g for g in m.gensets
+                      if g['geral'] == kind and self.classificar(g) == tipo]
+
+                if gs:
+                    for g in gs:
+                        cobertos = set(g['especificas'])
+                        linhas = [m.linha(kind), g['linha']] + \
+                                 [m.linha(s) for s in g['especificas']]
+                        viol = self.erros_por_genset.get(id(g), 0)
+                        self._padrao(
+                            linhas, ROTULO[tipo] + (f" (com {viol} violação(ões))" if viol else ""),
+                            f"kind {kind}; {tipo}s: {', '.join(g['especificas'])}; "
+                            f"genset {g['nome']} [{' '.join(g['modificadores']) or 'sem modificadores'}]")
+                        faltantes = [x for x in membros if x not in cobertos]
+                        if faltantes:
+                            if 'complete' in g['modificadores']:
+                                self._erro([g['linha']] + [m.linha(x) for x in faltantes],
+                                           f"Genset '{g['nome']}' é complete, mas não lista "
+                                           f"{tipo}(s) de '{kind}': {', '.join(faltantes)}",
+                                           f"inclua {', '.join(faltantes)} em 'specifics'",
+                                           genset=g)
+                            else:
+                                self._incompleto([g['linha']] + [m.linha(x) for x in faltantes],
+                                                 f"{ROTULO[tipo]} parcial: {', '.join(faltantes)} "
+                                                 f"especializa(m) '{kind}' fora do genset '{g['nome']}'",
+                                                 f"dedução: acrescentar {', '.join(faltantes)} em 'specifics'")
+                    continue
+
+                # sem genset: sobrecarga por evidência parcial 
+                linhas = [m.linha(kind)] + [m.linha(x) for x in membros]
+                if len(membros) >= 2:
+                    self._incompleto(
+                        linhas,
+                        f"{ROTULO[tipo]} incompleto: kind '{kind}' com {len(membros)} {tipo}s "
+                        f"({', '.join(membros)}) e nenhum genset",
+                        "dedução: " + self._tpl_genset(tipo, kind, membros))
+                elif tipo in ('subkind', 'phase'):
+                    self._incompleto(
+                        linhas,
+                        f"{ROTULO[tipo]} incompleto: só existe {tipo} '{membros[0]}' "
+                        f"sob '{kind}' (o padrão particiona em ao menos 2)",
+                        f"dedução: declare ao menos mais um {tipo} sob '{kind}' e o genset "
+                        + self._tpl_genset(tipo, kind, [membros[0], f"Outro_{NOME_CURTO[tipo]}"]))
+
+    @staticmethod
+    def _tpl_genset(tipo, geral, specs):
+        regras = GENSET_RULES[tipo]
+        mods = [x for x in ('disjoint', 'complete') if regras[x] != 'proibido']
+        nome = f"{geral}_{NOME_CURTO[tipo]}_Genset"
+        return (f"{' '.join(mods)} genset {nome} "
+                f"{{ general {geral} specifics {', '.join(specs)} }}")
