@@ -248,6 +248,8 @@ def p_internal_relation_named(p):
             'destino': p[5]
         }
 
+    p[0]['linha'] = p.lineno(1)
+    
 # Formato: @mediation [1] <>-- [1..*] CarAgency OU [1] <>-- [1..*] CarAgency
 def p_internal_relation_unnamed(p):
     '''internal_relation : AT relation_stereotype cardinality relation_sym cardinality CLASS_NAME
@@ -270,6 +272,8 @@ def p_internal_relation_unnamed(p):
             'cardinalidade_destino': p[3],
             'destino': p[4]
         }
+    
+    p[0]['linha'] = p.lineno(1)
 
 # Formato: @mediation [1] -- involvesOwner -- [1..*] CarAgency OU [1] -- involvesOwner -- [1..*] CarAgency
 def p_internal_relation_full(p):
@@ -293,7 +297,8 @@ def p_internal_relation_full(p):
             'cardinalidade_destino': p[5],
             'destino': p[6]
         }
-
+        
+    p[0]['linha'] = p.lineno(1)
 # ==========================================
 # RELAÇÕES EXTERNAS E COMPONENTES
 # ==========================================
