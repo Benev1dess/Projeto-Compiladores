@@ -348,3 +348,143 @@ class Analisador:
         nome = f"{geral}_{NOME_CURTO[tipo]}_Genset"
         return (f"{' '.join(mods)} genset {nome} "
                 f"{{ general {geral} specifics {', '.join(specs)} }}")
+
+    # RoleMixin
+    def padrao_rolemixin(self):
+        m = self.m
+        for nome in m.com_estereotipo('roleMixin'):
+            c = m.classes[nome]
+            gs = [g for g in m.gensets
+                  if g['geral'] == nome and self.classificar(g) == 'rolemixin']
+            candidatos = [r for r in m.com_estereotipo('role')
+                          if nome in m.classes[r]['superclasse']]
+
+            if gs:
+                for g in gs:
+                    specs = g['especificas']
+                    viol = self.erros_por_genset.get(id(g), 0)
+                    linhas = [c['linha'], g['linha']] + [m.linha(s) for s in specs]
+                    self._padrao(
+                        linhas, ROTULO['rolemixin'] + (f" (com {viol} violação(ões))" if viol else ""),
+                        f"roleMixin {nome}; roles: {', '.join(specs)}; genset {g['nome']} "
+                        f"[{' '.join(g['modificadores']) or 'sem modificadores'}]")
+                    bases = [tuple(sorted(p for p in m.pais(s) if m.est(p) == 'kind'))
+                             for s in specs]
+                    if len(specs) >= 2 and len(set(bases)) == 1 and bases[0]:
+                        self._erro([g['linha']] + [m.linha(s) for s in specs],
+                                   f"Todos os roles de '{nome}' especializam o mesmo kind "
+                                   f"({', '.join(bases[0])}); isso é o Role Pattern, "
+                                   f"não o RoleMixin Pattern",
+                                   "use roles de kinds diferentes ou troque o roleMixin por um genset de roles",
+                                   'AVISO')
+                    faltantes = [r for r in candidatos if r not in specs]
+                    if faltantes:
+                        self._incompleto([g['linha']] + [m.linha(x) for x in faltantes],
+                                         f"RoleMixin Pattern parcial: {', '.join(faltantes)} "
+                                         f"especializa(m) '{nome}' fora do genset '{g['nome']}'",
+                                         f"dedução: acrescentar {', '.join(faltantes)} em 'specifics'")
+                continue
+
+            if len(candidatos) >= 2:
+                self._incompleto([c['linha']] + [m.linha(x) for x in candidatos],
+                                 f"RoleMixin Pattern incompleto: '{nome}' tem roles "
+                                 f"({', '.join(candidatos)}) mas nenhum genset",
+                                 "dedução: " + self._tpl_genset('rolemixin', nome, candidatos))
+            else:
+                roles = m.com_estereotipo('role')
+                self._incompleto([c['linha']],
+                                 f"RoleMixin Pattern incompleto: '{nome}' não agrupa roles "
+                                 f"(o padrão exige ao menos 2 roles de kinds distintos)",
+                                 "dedução: " + self._tpl_genset('rolemixin', nome,
+                                                                 roles[:2] or ['Role_A', 'Role_B']))
+
+    # Relator
+    def padrao_relator(self):
+        m = self.m
+        mediados = {}
+        for nome, c in m.classes.items():
+            if c['estereotipo'] != 'relator':
+                continue
+            meds = m.relacoes(c, 'mediation')
+            alvos = [r['destino'] for r in meds]
+            unicos = list(dict.fromkeys(alvos))
+            mediados[nome] = unicos
+            linhas_med = [r.get('linha', c['linha']) for r in meds]
+
+            if len(unicos) < len(alvos):
+                self._erro([c['linha']] + linhas_med,
+                           f"Relator '{nome}' tem mais de uma mediation para a mesma classe",
+                           "mantenha uma única mediation por entidade mediada")
+
+            if len(unicos) < 2:
+                livres = [n for n in m.com_estereotipo('role') if n not in unicos]
+                sug = ["@mediation [1..*] -- [1..*] " + (unicos[0] if unicos else "<Role_A>"),
+                       "@mediation [1..*] -- [1..*] " + (livres[0] if livres else "<Role_B>")]
+                self._incompleto([c['linha']] + linhas_med,
+                                 f"Relator Pattern incompleto: '{nome}' medeia {len(unicos)} "
+                                 f"entidade(s); o padrão exige ao menos 2 roles",
+                                 "dedução: " + " / ".join(sug))
+                continue
+
+            for r in meds:
+                d, ln = r['destino'], r.get('linha', c['linha'])
+                if d in m.classes and m.est(d) != 'role':
+                    roles = m.filhos_de(d, 'role')
+                    dica = (f"mediar o role que especializa '{d}'"
+                            + (f" (ex.: {', '.join(roles)})" if roles
+                               else " (declare um role que o especialize)"))
+                    self._erro([ln], f"mediation de '{nome}' aponta para '{d}' "
+                                     f"({m.est(d)}); o Relator Pattern usa roles", dica, 'AVISO')
+                for lado, card in (('do relator', r.get('cardinalidade_origem')),
+                                   ('de '+d, r.get('cardinalidade_destino'))):
+                    lo = limite_inferior(card)
+                    if lo is not None and lo < 1:
+                        self._erro([ln], f"mediation em '{nome}': cardinalidade {lado} "
+                                         f"[{card}] permite 0; mediation exige dependência existencial",
+                                   "use [1..*] (ou [1]) nesse lado")
+
+            completo, linhas_pad, materiais = True, [c['linha']] + linhas_med + [m.linha(x) for x in unicos], []
+            for i in range(len(unicos)):
+                for j in range(i + 1, len(unicos)):
+                    a, b = unicos[i], unicos[j]
+                    rels = [x for x in m.relacoes_externas
+                            if {x['dominio'], x['imagem']} == {a, b}]
+                    mat = [x for x in rels if x['estereotipo'] == 'material']
+                    if mat:
+                        for x in mat:
+                            linhas_pad.append(x['linha'])
+                            materiais.append(f"{x['dominio']} -- {x['nome_relacao']} -- {x['imagem']}")
+                        continue
+                    completo = False
+                    for x in rels:
+                        self._erro([x['linha']],
+                                   f"Relação entre '{a}' e '{b}' (mediados por '{nome}') "
+                                   f"usa @{x['estereotipo']}; o padrão exige @material",
+                                   f"troque '@{x['estereotipo']}' por '@material'")
+                    if not rels:
+                        self._incompleto(
+                            [c['linha']] + linhas_med,
+                            f"Relator Pattern incompleto: '{nome}' medeia '{a}' e '{b}' "
+                            f"mas falta a relação material entre eles",
+                            f"dedução: @material relation {a} [1..*] -- relationName -- [1..*] {b}")
+            if completo:
+                self._padrao(linhas_pad, "Relator Pattern",
+                             f"relator {nome} medeia {', '.join(unicos)}; "
+                             f"relação material: {'; '.join(materiais)}")
+
+        for x in m.relacoes_externas:
+            if x['estereotipo'] != 'material':
+                continue
+            d, i = x['dominio'], x['imagem']
+            for lado in (d, i):
+                if lado in m.classes and m.est(lado) != 'role':
+                    self._erro([x['linha']], f"@material liga '{lado}' ({m.est(lado)}); "
+                                             f"o Relator Pattern liga roles",
+                               f"use o role que especializa '{lado}'", 'AVISO')
+            if not any(d in al and i in al for al in mediados.values()):
+                self._incompleto(
+                    [x['linha']],
+                    f"Relator Pattern incompleto: relação @material entre '{d}' e '{i}' "
+                    f"sem relator que medeie ambos",
+                    f"dedução: relator {d}_{i}_Relator {{ @mediation [1..*] -- [1..*] {d} ; "
+                    f"@mediation [1..*] -- [1..*] {i} }}")
