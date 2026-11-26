@@ -488,3 +488,128 @@ class Analisador:
                     f"sem relator que medeie ambos",
                     f"dedução: relator {d}_{i}_Relator {{ @mediation [1..*] -- [1..*] {d} ; "
                     f"@mediation [1..*] -- [1..*] {i} }}")
+    def padrao_mode(self):
+        m = self.m
+        kinds = m.com_estereotipo('kind')
+        dica_alvo = ' | '.join(kinds) if kinds else '<Classe>'
+        for nome in m.com_estereotipo('mode'):
+            c = m.classes[nome]
+            ch = m.relacoes(c, 'characterization')
+            ex = m.relacoes(c, 'externalDependence')
+            l_ch = [r.get('linha', c['linha']) for r in ch]
+            l_ex = [r.get('linha', c['linha']) for r in ex]
+
+            if len(ch) > 1:
+                self._erro([c['linha']] + l_ch,
+                           f"Mode '{nome}' tem {len(ch)} characterization; "
+                           f"um mode inere em exatamente um portador",
+                           "mantenha uma única @characterization")
+
+            for r in ch + ex:
+                lo_dest = r.get('cardinalidade_destino')
+                if lo_dest is not None and str(lo_dest) != '1':
+                    self._erro([r.get('linha', c['linha'])],
+                               f"@{r['estereotipo']} em '{nome}': cardinalidade [{lo_dest}] "
+                               f"no lado de '{r['destino']}'; o padrão usa [1]",
+                               "troque a cardinalidade por [1]")
+
+            if ch and ex:
+                if {r['destino'] for r in ch} & {r['destino'] for r in ex}:
+                    comum = ({r['destino'] for r in ch} & {r['destino'] for r in ex}).pop()
+                    self._erro([c['linha']] + l_ch + l_ex,
+                               f"Mode '{nome}': portador e dependência externa são a mesma "
+                               f"classe ('{comum}')",
+                               "externalDependence deve apontar para uma classe diferente do portador")
+                self._padrao([c['linha']] + l_ch + l_ex, "Mode Pattern",
+                             f"mode {nome}; characterization -> {ch[0]['destino']}; "
+                             f"externalDependence -> {', '.join(r['destino'] for r in ex)}")
+            elif ch:
+                self._incompleto([c['linha']] + l_ch,
+                                 f"Mode Pattern incompleto: '{nome}' só tem @characterization "
+                                 f"(portador '{ch[0]['destino']}')",
+                                 f"dedução: @externalDependence [1..*] -- [1] {dica_alvo}  "
+                                 f"(se não há dependência externa, é um intrinsicMode)")
+            elif ex:
+                self._erro([c['linha']] + l_ex,
+                           f"Mode '{nome}' tem @externalDependence mas nenhuma @characterization; "
+                           f"todo mode inere em um portador",
+                           f"acrescente: @characterization [1..*] -- [1] {dica_alvo}")
+            else:
+                self._incompleto([c['linha']],
+                                 f"Mode Pattern incompleto: '{nome}' não tem relações",
+                                 f"dedução: @characterization [1..*] -- [1] {dica_alvo} ; "
+                                 f"@externalDependence [1..*] -- [1] {dica_alvo}")
+    def imprimir(self, arquivo):
+        barra = '=' * 72
+        print(barra)
+        print(f"ANÁLISE SEMÂNTICA: {arquivo}  (package {self.m.pacote})")
+        print(barra)
+
+        print("\n[1] PADRÕES ENCONTRADOS")
+        if not self.padroes:
+            print("   (nenhum padrão completo reconhecido)")
+        for a in self.padroes:
+            print(f"   [{a.rotulo_linhas()}] ✔ {a.titulo}")
+            print(f"        {a.detalhe}")
+
+        print("\n[2] ERROS E COERÇÃO (correção sugerida)")
+        if not self.erros:
+            print("   (nenhum erro)")
+        for a in self.erros:
+            print(f"   [{a.rotulo_linhas()}] {a.sev}: {a.titulo}")
+            if a.sugestao:
+                print(f"        ↳ coerção: {a.sugestao}")
+
+        print("\n[3] PADRÕES INCOMPLETOS (dedução)")
+        if not self.incompletos:
+            print("   (nenhum)")
+        for a in self.incompletos:
+            print(f"   [{a.rotulo_linhas()}] ~ {a.titulo}")
+            if a.sugestao:
+                print(f"        ↳ {a.sugestao}")
+
+        n_err = sum(1 for a in self.erros if a.sev == 'ERRO')
+        n_av = len(self.erros) - n_err
+        print(f"\nRESUMO: {len(self.padroes)} padrão(ões) · {n_err} erro(s) · "
+              f"{n_av} aviso(s) · {len(self.incompletos)} incompleto(s)\n")
+        return n_err
+
+
+def analisar_semantica(ast):
+    return Analisador(ast).executar()
+
+
+def main(argv):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+    if len(argv) < 2:
+        print('Uso: python3 semantic.py <arquivo.tonto> [outros.tonto ...]')
+        return 1
+
+    from parser import analisar, ErroSintatico   # import tardio: núcleo testável sem PLY
+
+    total_erros = 0
+    for caminho in argv[1:]:
+        try:
+            with open(caminho, 'r', encoding='utf-8') as f:
+                texto = f.read()
+        except OSError as e:
+            print(f'Erro ao abrir {caminho}: {e}')
+            total_erros += 1
+            continue
+        try:
+            ast = analisar(texto)
+        except ErroSintatico:
+            print(f'>> {caminho}: erro sintático; análise semântica não executada.\n')
+            total_erros += 1
+            continue
+        total_erros += analisar_semantica(ast).imprimir(caminho)
+    return 1 if total_erros else 0
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv))
+
+
